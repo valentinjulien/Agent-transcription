@@ -9,8 +9,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.API_KEY;
 
-// Middleware
-app.use(cors());
+// Middleware - Allow CORS for external requests (n8n)
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'x-api-key'],
+  credentials: false
+}));
 app.use(express.json());
 
 // API Key Authentication Middleware
@@ -97,6 +102,47 @@ async function extractWebText(websiteUrl) {
 // Test Connection endpoint
 app.get('/api/test-connection', authenticateAPIKey, (req, res) => {
   res.json({ status: 'success', message: 'API is active' });
+});
+
+// n8n-optimized endpoint - returns clean { title, content } format
+app.post('/api/extract-external', authenticateAPIKey, async (req, res) => {
+  const { type, url } = req.body;
+
+  if (!type || !url) {
+    return res.status(400).json({ error: 'Missing required fields: type and url' });
+  }
+
+  try {
+    let title = '';
+    let content = '';
+
+    if (type === 'youtube') {
+      const transcript = await extractYouTubeTranscript(url);
+      title = `YouTube Transcript: ${url}`;
+      content = transcript;
+    } else if (type === 'web') {
+      const text = await extractWebText(url);
+      title = `Web Content: ${url}`;
+      content = text;
+    } else {
+      return res.status(400).json({ error: 'Invalid type. Use "youtube" or "web"' });
+    }
+
+    res.json({ title, content });
+  } catch (error) {
+    console.error('Extraction Error:', error);
+    res.status(500).json({ error: error.message || 'Internal Server Error' });
+  }
+});
+
+// Get API credentials for frontend display
+app.get('/api/credentials', (req, res) => {
+  const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+  res.json({
+    apiKey: API_KEY,
+    webhookUrl: `${baseUrl}/api/extract-external`,
+    testUrl: `${baseUrl}/api/test-connection`
+  });
 });
 
 // Start server
